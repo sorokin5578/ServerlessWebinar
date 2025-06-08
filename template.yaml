@@ -1,0 +1,214 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Serverless Note API with Lambda, API Gateway, DynamoDB, and Budget
+  (manual code upload)
+
+Resources:
+
+  # 1. DynamoDB table
+  NotesTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: Notes
+      AttributeDefinitions:
+        - AttributeName: id
+          AttributeType: S
+      KeySchema:
+        - AttributeName: id
+          KeyType: HASH
+      BillingMode: PAY_PER_REQUEST
+
+  # 2. IAM role for Lambda
+  LambdaExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: NoteApiLambdaExecutionRole
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: NoteApiPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - dynamodb:PutItem
+                  - dynamodb:GetItem
+                  - dynamodb:Scan
+                  - dynamodb:DeleteItem
+                Resource: '*'
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: '*'
+
+  # 3. Lambda Function (empty, code to be uploaded manually)
+  NotesFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: NoteApiFunction
+      Handler: index.handler
+      Runtime: python3.12
+      Role: !GetAtt LambdaExecutionRole.Arn
+      Code:
+          ZipFile: |
+            import json
+            import uuid
+            import boto3
+            import os
+            from datetime import datetime, timezone
+
+            dynamodb = boto3.resource('dynamodb')
+            table_name = os.environ.get('TABLE_NAME', 'Notes')
+            table = dynamodb.Table(table_name)
+
+            def handler(event, context):
+                http_method = event.get('httpMethod')
+                resource_path = event.get('resource')
+
+                if http_method == 'POST' and resource_path == '/notes':
+                    body = json.loads(event.get('body', '{}'))
+                    note_id = str(uuid.uuid4())
+                    item = {
+                        'id': note_id,
+                        'text': body.get('text', ''),
+                        'createdAt': datetime.now(timezone.utc).isoformat()
+                    }
+                    table.put_item(Item=item)
+                    return {
+                        'statusCode': 201,
+                        'body': json.dumps({'message': 'Note created', 'id': note_id})
+                    }
+
+                elif http_method == 'GET' and resource_path == '/notes':
+                    response = table.scan()
+                    return {
+                        'statusCode': 200,
+                        'body': json.dumps(response.get('Items', []))
+                    }
+
+                elif http_method == 'DELETE' and resource_path == '/notes/{id}':
+                    path_params = event.get('pathParameters') or {}
+                    note_id = path_params.get('id')
+                    if not note_id:
+                        return {
+                            'statusCode': 400,
+                            'body': json.dumps({'error': 'Note ID is required in the path'})
+                        }
+                    table.delete_item(Key={'id': note_id})
+                    return {
+                        'statusCode': 200,
+                        'body': json.dumps({'message': f'Note {note_id} deleted'})
+                    }
+
+                return {
+                    'statusCode': 400,
+                    'body': json.dumps({'error': 'Unsupported method or path'})
+                }
+      Environment:
+        Variables:
+          TABLE_NAME: !Ref NotesTable
+
+  # 4. API Gateway
+  ApiGatewayRestApi:
+    Type: AWS::ApiGateway::RestApi
+    Properties:
+      Name: NoteApi
+
+  NotesResource:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      RestApiId: !Ref ApiGatewayRestApi
+      ParentId: !GetAtt ApiGatewayRestApi.RootResourceId
+      PathPart: notes
+
+  NoteIdResource:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      RestApiId: !Ref ApiGatewayRestApi
+      ParentId: !Ref NotesResource
+      PathPart: '{id}'
+
+  GetNotesMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref ApiGatewayRestApi
+      ResourceId: !Ref NotesResource
+      HttpMethod: GET
+      AuthorizationType: NONE
+      Integration:
+        Type: AWS_PROXY
+        IntegrationHttpMethod: POST
+        Uri: !Sub arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${NotesFunction.Arn}/invocations
+
+  PostNoteMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref ApiGatewayRestApi
+      ResourceId: !Ref NotesResource
+      HttpMethod: POST
+      AuthorizationType: NONE
+      Integration:
+        Type: AWS_PROXY
+        IntegrationHttpMethod: POST
+        Uri: !Sub arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${NotesFunction.Arn}/invocations
+
+  DeleteNoteMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref ApiGatewayRestApi
+      ResourceId: !Ref NoteIdResource
+      HttpMethod: DELETE
+      AuthorizationType: NONE
+      RequestParameters:
+        method.request.path.id: true
+      Integration:
+        Type: AWS_PROXY
+        IntegrationHttpMethod: POST
+        Uri: !Sub arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${NotesFunction.Arn}/invocations
+
+  ApiDeployment:
+    Type: AWS::ApiGateway::Deployment
+    DependsOn:
+      - GetNotesMethod
+      - PostNoteMethod
+      - DeleteNoteMethod
+    Properties:
+      RestApiId: !Ref ApiGatewayRestApi
+      StageName: default
+
+  # 5. Lambda invoke permission for API Gateway
+  LambdaInvokePermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref NotesFunction
+      Action: lambda:InvokeFunction
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${ApiGatewayRestApi}/*/*/*
+
+  # 6. AWS Budget
+  NotifyBudget:
+    Type: AWS::Budgets::Budget
+    Properties:
+      Budget:
+        BudgetName: NoteApiBudget
+        BudgetLimit:
+          Amount: 1
+          Unit: USD
+        TimeUnit: MONTHLY
+        BudgetType: COST
+      NotificationsWithSubscribers:
+        - Notification:
+            NotificationType: ACTUAL
+            ComparisonOperator: GREATER_THAN
+            Threshold: 80
+            ThresholdType: PERCENTAGE
+          Subscribers:
+            - SubscriptionType: EMAIL
+              Address: your_email@gamil.com # Replace with a verified email
