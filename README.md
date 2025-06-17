@@ -21,11 +21,8 @@ This project demonstrates a simple serverless API using AWS Lambda, API Gateway,
 4. Click through steps and create the stack (use default options)
 5. Wait for the stack to be created (it may take a few minutes)
 6. Once the stack is created, you will see a new API Gateway named `NoteApi`, a Lambda function named `NoteApiFunction`, a DynamoDB table named `Notes`, an IAM role for Lambda function named `NoteApiLambdaExecutionRole`, and a Budget alert configured. You can check the corresponding resources in the AWS Console.
-   ![CloudFormation Stack](https://d1.awsstatic.com/cloudformation/console/console-create-stack.0f3b2c8e4a5c6f7b9d3f8c9e4a5c6f7b9d3f8c9e.png)
 
    > ⚠️ **Important**: The Budget alert will be created with a \$1 monthly threshold. Replace the email in the template with your own before deployment.
-
-⚠️ Budget alert will be created with a \$1 monthly threshold. Replace email in the template with your own before deployment.
 
 ---
 
