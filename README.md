@@ -15,7 +15,7 @@ This project demonstrates a simple serverless API using AWS Lambda, API Gateway,
 
 ### 1. 🛠️ Launch the CloudFormation Stack
 
-1. Register in AWS if you haven't already: [AWS Free Tier](https://aws.amazon.com/free/). Documentation: [doc](https://docs.aws.amazon.com/accounts/latest/reference/getting-started.html).
+1. Register in [AWS](https://aws.amazon.com/console/?nc1=h_ls) if you haven't already: [AWS Free Tier](https://aws.amazon.com/free/). Documentation: [doc](https://docs.aws.amazon.com/accounts/latest/reference/getting-started.html).
 2. Go to AWS Console → CloudFormation → Create stack → "Choose an existing template (standard)"
 3. Upload the `template.yaml` file (Don't forget to change the email in the template to your own see `Address` for the `Budget` resource)
 4. Click through steps and create the stack (use default options)
